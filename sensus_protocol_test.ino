@@ -66,6 +66,60 @@ uint8_t readByte()
   return data;   
 }
 
+
+
+bool parseData(uint8_t * p_data, uint32_t * p_index, uint32_t * p_id )
+{
+  // data comes in as V;RBxxxxxxx;IByyyyy;Kmmmmm
+  //  where xxxx is the meter read value (arbitrary digits, but not more than 12)
+  //  yyyy is the meter id (arbitrary digits)
+  //  mmmm is another meter id (arbitrary digits)
+  //  Note that the IB and K parts are optional
+  enum STATE {PARSE_V, PARSE_SEMI, PARSE_PRE, PARSE_NUM} state = PARSE_V;
+
+  // temp storage for variables until we've parsed the whole string.
+  uint32_t k_number = 0;
+  uint32_t * num_ptr = &(k_number);
+  while (*p_data) {
+    switch (state) {
+      case PARSE_V:
+        if (*p_data != 'V') {
+          return false;
+        }
+        state = PARSE_SEMI;
+      break;
+      case PARSE_SEMI:
+        if (*p_data != ';') {
+          return false;
+        }
+        state = PARSE_PRE;
+      break;
+      case PARSE_PRE:
+        if ((*p_data == 'R') && (*(p_data + 1) == 'B')) {
+          num_ptr = p_index;
+          p_data ++;
+        } else if ((*p_data == 'I') && (*(p_data + 1) == 'B')) {
+          num_ptr = p_id;
+          p_data++;
+        } else if ((*p_data == 'K')) {
+          num_ptr = &k_number;
+        }
+        *num_ptr = 0;
+        state = PARSE_NUM;
+      break;
+      case PARSE_NUM:
+        if (((*p_data) >= 48) && ((*p_data) <= 57)) {
+          *num_ptr = (*num_ptr) * 10 + (*p_data) - 48;
+          break;
+        }
+        p_data--;
+        state = PARSE_SEMI;
+    }
+    p_data++;
+  }
+  return true;
+}
+
 uint8_t readData(uint8_t * p, uint8_t max_bytes) 
 {
   uint8_t c , i;
@@ -124,7 +178,21 @@ void loop()
   Serial.print("received "); 
   Serial.print(len); 
   Serial.println(" bytes"); 
-  Serial.println((char *) read_buff);
+  if (len<MAX_BYTES) {
+    uint32_t volume, id ;
+    if (parseData(read_buff, &volume, &id)) {
+      Serial.print("MeterID "); 
+      Serial.print(id); 
+      Serial.print(", Volume "); 
+      Serial.println(volume); 
+    } else {
+      Serial.print("Unable to decode "); 
+      Serial.println((char *) read_buff);
+    }
+  } else {
+    Serial.println("Unable to read "); 
+  }
+
   // Wait 10s before next reading
   delay(10000);
 }
