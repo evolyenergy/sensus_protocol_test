@@ -10,7 +10,7 @@
 #define clock_OFF 1
 #endif
 
-#define MAX_BYTES 50
+#define MAX_BYTES 32
 
 uint8_t clock_pin = 2;
 uint8_t read_pin = 3;
