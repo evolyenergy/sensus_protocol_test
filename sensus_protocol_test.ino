@@ -135,7 +135,7 @@ uint8_t readData(uint8_t * p, uint8_t max_bytes)
     c = readByte();
     Serial.print(c, HEX);
     // Finished ?
-    if (c == '\r') {
+    if (c == '\r' || c == '\n') {
       break;
     }
     // Save byte
