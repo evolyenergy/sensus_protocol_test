@@ -15,23 +15,27 @@
 uint8_t clock_pin = 2;
 uint8_t read_pin = 3;
 
-uint8_t read_buff[MAX_BYTES]; // receive buffer
+// receive buffer
+uint8_t read_buff[MAX_BYTES]; 
 
 // power on meter
-void powerUp() {
+void powerUp()
+{
   Serial.print("Powering Meter...");
   digitalWrite(clock_pin, clock_ON); 
   // wait to stabilize
-  delay(500);
+  delay(1000);
   Serial.println("Done");
 }
 
 // power off meter
-void powerDown() {
+void powerDown()
+{
   digitalWrite(clock_pin, clock_OFF);
 }
 
-uint8_t readBit() {
+uint8_t readBit()
+{
   digitalWrite(clock_pin, clock_OFF);
   delay(DELAY_MS);
   uint8_t val = digitalRead(read_pin);
@@ -40,15 +44,16 @@ uint8_t readBit() {
   return val;
 }
 
-uint8_t readByte() {
-  uint8_t result = 0;
+uint8_t readByte() 
+{
+  uint8_t data = 0;
   bool parity = false;
   if (readBit() != 0) {
     Serial.print("{");
   }
   for (int i = 0; i < 7; ++i) {
     if (readBit()) {
-      result |= (1 << i);
+      data |= (1 << i);
       parity = !parity;
     }
   }
@@ -58,22 +63,7 @@ uint8_t readByte() {
   if (readBit() != 1) {
     Serial.print("}");
   }
-  return result;   
-}
-
-uint8_t _readByte() {
-  uint8_t bits[10];
-  for (uint8_t i = 0; i < 10; ++i) {
-    bits[i] = readBit();
-  }
-  uint8_t result = 0;
-  for (uint8_t b = 0; b < 7; ++b) {
-    uint8_t i = b + 1;
-    if (bits[i]) {
-      result |= (1 << b);
-    }
-  }
-  return result;    
+  return data;   
 }
 
 uint8_t readData(uint8_t * p, uint8_t max_bytes) 
@@ -81,9 +71,12 @@ uint8_t readData(uint8_t * p, uint8_t max_bytes)
   uint8_t c , i;
   // Power up Meter
   powerUp();
+
   Serial.print("Reading : ");
+
   // Clear receive buffer
   memset(p, 0, sizeof(max_bytes));
+
   for (i = 0; i < max_bytes; ++i) {
     c = readByte();
     Serial.print(c, HEX);
@@ -91,6 +84,7 @@ uint8_t readData(uint8_t * p, uint8_t max_bytes)
     if (c == '\r') {
       break;
     }
+    // Save byte
     *p++ = c;
   }
   Serial.println();
@@ -99,7 +93,8 @@ uint8_t readData(uint8_t * p, uint8_t max_bytes)
   return i;
 }
 
-void setup() {
+void setup() 
+{
   // put your setup code here, to run once:
   Serial.begin(115200);
 
@@ -112,13 +107,18 @@ void setup() {
   Serial.print(")" );  
   Serial.print(" data pin "); 
   Serial.println(read_pin);
-  digitalWrite(clock_pin, clock_OFF); // power off the meter
+  // power off the meter
+  digitalWrite(clock_pin, clock_OFF); 
   pinMode(read_pin, INPUT_PULLUP);
-  delay(5000); // make sure that the meter is reset
+
+  // make sure that the meter is reset
+  delay(2000); 
+  
   Serial.println("setup done...");
 }
 
-void loop() {
+void loop() 
+{
   uint8_t len;
   len = readData(read_buff, MAX_BYTES);
   Serial.print("received "); 
