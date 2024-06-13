@@ -2,6 +2,18 @@
 #define SWAP_CLOCK
 #define DELAY_MS 1
 
+// Select here meter type to be tested
+//#define TYPE_SENSUS
+#define TYPE_NEPTUNE
+
+#if defined (TYPE_SENSUS) && defined (TYPE_NEPTUNE)  
+#error "Multiple smart meters are defined please use only one"
+#endif
+
+#if !defined (TYPE_SENSUS) && !defined (TYPE_NEPTUNE)  
+#error "No smart meter defined please select one"
+#endif
+
 #ifdef SWAP_CLOCK
 #define clock_ON  1
 #define clock_OFF 0
@@ -332,20 +344,32 @@ void setup()
   Serial.print(")" );  
   Serial.print(" data pin "); 
   Serial.println(read_pin);
+
   // power off the meter
   digitalWrite(clock_pin, clock_OFF); 
   pinMode(read_pin, INPUT_PULLUP);
 
+  // Select here one to be tested, not both
+  #if defined (TYPE_SENSUS) 
+  Serial.print("Sensus");
+  #elif defined (TYPE_NEPTUNE)  
+  Serial.print("Neptune");
+  #endif
+
   // make sure that the meter is reset
   delay(2000); 
   
-  Serial.println("Meter setup done...");
+  Serial.println(" Meter setup done...");
 }
 
 void loop() 
 {
+  // Select here one to be tested, not both
+  #if defined (TYPE_SENSUS) 
   read_sensus();
+  #elif defined (TYPE_NEPTUNE)  
   read_neptune();
+  #endif
 
   // Wait 10s before next reading
   delay(10000);
