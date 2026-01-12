@@ -1,6 +1,7 @@
 #include <Arduino.h>
-#define SWAP_CLOCK  // Allow to quick test swapping clock mode (ie 0->1 or 1->0)
-#define DELAY_MS 1  // delay between clock pulse and read (and read to clock end)
+#define SWAP_CLOCK          // Allow to quick test swapping clock mode (ie 0->1 or 1->0)
+#define DELAY_MS 1          // delay between clock pulse and read (and read to clock end)
+#define MAX_WAKE_PULSE  100 // Max pulse to wait for start bit of the frame
 
 #ifdef SWAP_CLOCK
 #define clock_ON  1
@@ -18,6 +19,7 @@ uint8_t read_pin = 3;   // D3 for data reading
 
 // Sensus receive buffer
 uint8_t read_buff[MAX_BYTES]; 
+bool sync_start = true;
 
 // power on meter
 void powerUp()
@@ -49,9 +51,22 @@ uint8_t sensus_readBit()
 
 uint8_t sensus_readByte() 
 {
+  
   uint8_t data = 0;
   bool parity = false;
-  if (sensus_readBit() != 0) {
+  uint8_t bit = sensus_readBit() ;
+
+  if (sync_start) {
+    uint8_t to = MAX_WAKE_PULSE;
+    Serial.println("Wait Start bit");
+    while ( bit != 0 && to > 0 ) {
+      to--;
+      bit = sensus_readBit();
+    }
+    sync_start = false;
+  }
+
+  if (bit != 0) {
     Serial.print("{");
   }
   for (int i = 0; i < 7; ++i) {
@@ -79,6 +94,9 @@ uint8_t sensus_readData(uint8_t * p, uint8_t max_bytes)
 
   // Clear receive buffer
   memset(p, 0, sizeof(max_bytes));
+
+  // Sync start bit
+  sync_start = true;
 
   for (i = 0; i < max_bytes; ++i) {
     c = sensus_readByte();
