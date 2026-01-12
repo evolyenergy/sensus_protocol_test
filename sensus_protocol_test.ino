@@ -1,226 +1,273 @@
 #include <Arduino.h>
-#define SWAP_CLOCK  // Allow to quick test swapping clock mode (ie 0->1 or 1->0)
-#define DELAY_MS 1  // delay between clock pulse and read (and read to clock end)
 
-#ifdef SWAP_CLOCK
-#define clock_ON  1
-#define clock_OFF 0
-#else 
-#define clock_ON  0
-#define clock_OFF 1
-#endif
+#define RxData 3
+#define TxClock 2 //D5(pin 14)
 
-#define MAX_BYTES 32 // Sensus
+int cycle = 0;
+byte val = 0;
+byte clkState = LOW;
+unsigned int ab;
+unsigned int meterByte[100];
+unsigned long count = 0;
+unsigned long test = 0;
+unsigned long currentMillis = millis();
+unsigned long currentMicros = micros();
+unsigned long previousMillis = 0; // For Delay between meter reads
+unsigned long previousClkMicros = 0; // For TxClock timing
+unsigned long interval = 30000; // 10 sec Time delay between Meter Reads
+unsigned long ClkTime = 550; //[550 100%], [500 No Good], [800 NO], [450 NO], [600 OK]
 
-// IO Used
-uint8_t clock_pin = 2;  // D2 for clock
-uint8_t read_pin = 3;   // D3 for data reading
 
-// Sensus receive buffer
-uint8_t read_buff[MAX_BYTES]; 
-
-// power on meter
-void powerUp()
+void ReadCycle()
 {
-  Serial.print("Powering Meter...");
-  digitalWrite(clock_pin, clock_ON); 
+  for (int ReadByte=0; ReadByte<7; ReadByte++)
+  {
+    // delay(10);
+    //10 bit byte
+    for (int bitCount=0;bitCount<10;bitCount++)
+    { 
+      int var = 0;
+      // 2 phase per clock cycle
+      while(var <2)
+      { 
+        currentMicros = micros();
 
-  // wait to stabilize
-  delay(1000);
-
-  Serial.println("Done");
-}
-
-// power off meter
-void powerDown()
-{
-  digitalWrite(clock_pin, clock_OFF);
-}
-
-uint8_t sensus_readBit()
-{
-  digitalWrite(clock_pin, clock_OFF);
-  delay(DELAY_MS);
-  uint8_t val = digitalRead(read_pin);
-  digitalWrite(clock_pin, clock_ON);
-  delay(DELAY_MS);
-  return val;
-}
-
-uint8_t sensus_readByte() 
-{
-  uint8_t data = 0;
-  bool parity = false;
-  if (sensus_readBit() != 0) {
-    Serial.print("{");
-  }
-  for (int i = 0; i < 7; ++i) {
-    if (sensus_readBit()) {
-      data |= (1 << i);
-      parity = !parity;
+        // change state every 550uS
+        if (currentMicros - previousClkMicros > ClkTime)
+        { 
+          if (clkState==LOW)
+          {
+            delayMicroseconds(50); // time for wifi overhead
+            clkState = HIGH;
+            digitalWrite(TxClock,HIGH);
+            previousClkMicros = currentMicros;
+          }
+          else
+          { //clkState was HIGH
+            // strip Start,top 3 bits, Stop, and parity
+            if (bitCount >0 && bitCount <8)
+            { 
+              delayMicroseconds(50); // wifi overhead
+              val = digitalRead(RxData); // Read at end of HIGH
+              bitWrite(meterByte[ReadByte], bitCount-1, val);// write bit state
+            }
+            clkState = LOW;
+            digitalWrite(TxClock,LOW);
+            previousClkMicros = currentMicros;
+          }
+          var++;
+        }
+      }
     }
-  }
-  if (sensus_readBit() != parity) {
-    Serial.print("!");
-  }
-  if (sensus_readBit() != 1) {
-    Serial.print("}");
-  }
-  return data;   
-}
-
-uint8_t sensus_readData(uint8_t * p, uint8_t max_bytes) 
-{
-  uint8_t c , i;
-  // Power up Meter
-  powerUp();
-
-  Serial.print("Reading : ");
-
-  // Clear receive buffer
-  memset(p, 0, sizeof(max_bytes));
-
-  for (i = 0; i < max_bytes; ++i) {
-    c = sensus_readByte();
-    Serial.print(c);
-    Serial.print(c, HEX);
-    // Finished ?
-    if (c == '\r' || c == '\n') {
-      break;
-    }
-    // Save byte
-    *p++ = c;
   }
   Serial.println();
-  // Unpower Meter
-  powerDown();
-  return i;
 }
 
-// data comes in as V;RBxxxxxxx;IByyyyy;Kmmmmm
-//  where xxxx is the meter read value (arbitrary digits, but not more than 12)
-//  yyyy is the meter id (arbitrary digits)
-//  mmmm is another meter id (arbitrary digits)
-//  Note that the IB and K parts are optional
-bool sensus_parseData(uint8_t * p_data, uint32_t * p_index, uint32_t * p_id )
-{
+// 50 ascii char pre clock
+void PreClock()
+{ 
 
-  enum STATE {PARSE_V, PARSE_SEMI, PARSE_PRE, PARSE_NUM} state = PARSE_V;
-
-  // temp storage for variables until we've parsed the whole string.
-  uint32_t k_number = 0;
-  uint32_t * num_ptr = &(k_number);
-
-  while (*p_data) {
-    switch (state) {
-      case PARSE_V:
-        if (*p_data != 'V') {
-          return false;
+ //NOT 75, 10, 20
+ for (int y=0; y<30; y++)
+ { 
+   // ascii char 1S, 7Db, 1P, 1ST = 10 bits
+   for (int i=0;i<10;i++)
+   { 
+      int var = 0;
+      while(var <2)
+      {
+        currentMicros = micros();
+        // change state every 550uS
+        if (currentMicros - previousClkMicros > ClkTime)
+        { 
+          if (clkState==LOW)
+          {
+            clkState = HIGH;
+            digitalWrite(TxClock,HIGH);
+            previousClkMicros = currentMicros;
+          }
+          else 
+          { //clkState was HIGH
+            clkState = LOW;
+            digitalWrite(TxClock,LOW);
+            previousClkMicros = currentMicros;
+          }
+          var++;
         }
-        state = PARSE_SEMI;
-      break;
-      case PARSE_SEMI:
-        if (*p_data != ';') {
-          return false;
-        }
-        state = PARSE_PRE;
-      break;
-      case PARSE_PRE:
-        if ((*p_data == 'R') && (*(p_data + 1) == 'B')) {
-          num_ptr = p_index;
-          p_data ++;
-        } else if ((*p_data == 'I') && (*(p_data + 1) == 'B')) {
-          num_ptr = p_id;
-          p_data++;
-        } else if ((*p_data == 'K')) {
-          num_ptr = &k_number;
-        }
-        *num_ptr = 0;
-        state = PARSE_NUM;
-      break;
-      case PARSE_NUM:
-        if (((*p_data) >= 48) && ((*p_data) <= 57)) {
-          *num_ptr = (*num_ptr) * 10 + (*p_data) - 48;
-          break;
-        }
-        p_data--;
-        state = PARSE_SEMI;
+      }
     }
-    p_data++;
   }
-  return true;
 }
 
-void read_sensus() 
+void DataPrint()
 {
-  uint8_t len;
-  len = sensus_readData(read_buff, MAX_BYTES);
-  Serial.print("received "); 
-  Serial.print(len); 
-  Serial.println(" bytes"); 
+  for (int i=1; i<6; i++)
+  {
+    char ab = meterByte[i];
+    Serial.print(ab);
+  }
+  Serial.print(".");
+  char ab = meterByte[6];
+  Serial.print(ab);
+  Serial.print(" cycle count is ");
+  cycle++;
+  Serial.println(cycle); // counts between resets
+}
 
-  if (len<MAX_BYTES) {
-    uint32_t volume, id ;
-    if (sensus_parseData(read_buff, &volume, &id)) {
-      Serial.print("MeterID "); 
-      Serial.print(id); 
-      Serial.print(", Volume "); 
-      Serial.println(volume); 
-    } else {
-      Serial.print("Unable to decode "); 
-      Serial.println((char *) read_buff);
+void SyncCycle() // potentially loose sync after 25 or so - need to renull if R is not found
+{
+  for (int ReadByte=0; ReadByte<36; ReadByte++)
+  { // 36 bytes
+    for (int bitCount=0;bitCount<10;bitCount++)
+    { // 10 bits
+      int var = 0;
+      while(var <2)
+      {
+        currentMicros = micros();
+        if (currentMicros - previousClkMicros > ClkTime)
+        { // change state every 500uS
+          if (clkState==LOW)
+          {
+            clkState = HIGH;
+            digitalWrite(TxClock,HIGH);
+            previousClkMicros = currentMicros;
+          }
+          else 
+          { //clkState was HIGH
+            if (bitCount >0 && bitCount <8)
+            { // strip Start, Stop, and parity
+              val = digitalRead(RxData); // Read on HIGH
+              bitWrite(meterByte[ReadByte], bitCount-1, val);// write bit state
+            }
+            clkState = LOW;
+            digitalWrite(TxClock,LOW);
+            previousClkMicros = currentMicros;
+          }
+          var++;
+        }
+      }
     }
-  } else {
-    Serial.println("Unable to read "); 
-  }
 
-  // Wait 10s before next reading
-  delay(10000);
+    char ab = meterByte[ReadByte];
+    if ((meterByte[ReadByte])== 82)
+    { //R=82 This works!!!
+      break;
+    }
+  }
 }
 
-void setup() 
+void AlignByte()
+{//in 360 bits find low
+
+  for (int bitCount=0; bitCount<360; bitCount++)
+  {
+    int var = 0;
+    while(var <2)
+    {
+      currentMicros = micros();
+      if (currentMicros - previousClkMicros > ClkTime)
+      { // change state every 500uS
+        if (clkState==LOW)
+        {
+          clkState = HIGH;
+          digitalWrite(TxClock,HIGH);
+          previousClkMicros = currentMicros;
+        }
+        else 
+        { //clkState was HIGH
+          val = digitalRead(RxData); // Read on HIGH
+          if (val==LOW)
+          {
+            break;
+          }
+          clkState = LOW;
+         digitalWrite(TxClock,LOW);
+          previousClkMicros = currentMicros;
+
+        }
+        var++;
+      }
+    }
+  }
+}
+
+void FindNull()
+{ //look for 11 ones in a row
+  int eleven = 0;
+  for (int bitCount=0; bitCount<360; bitCount++)
+  {
+    int var = 0;
+    while(var <2)
+    {
+      currentMicros = micros();
+      if (currentMicros - previousClkMicros > ClkTime)
+      { // change state every 500uS
+        if (clkState==LOW)
+        {
+          clkState = HIGH;
+          digitalWrite(TxClock,HIGH);
+          previousClkMicros = currentMicros;
+        }
+        else 
+        { //clkState was HIGH
+          val = digitalRead(RxData); // Read at end of HIGH
+          if (val==HIGH)
+          {
+            eleven++;
+            if (eleven ==11)
+            {
+              break;
+            }
+          }
+          else
+          { // val == LOW
+            eleven = 0;
+          }
+          clkState = LOW;
+          digitalWrite(TxClock,LOW);
+          previousClkMicros = currentMicros;
+        }
+        var++;
+      }
+    }
+  }
+}
+
+void GetData()
 {
-  // put your setup code here, to run once:
+  Serial.println("GetData");
+  PreClock(); // 0-50 ascii char
+  FindNull(); // start in a null patch
+  AlignByte(); // look for start bit within 45 bytes
+  SyncCycle(); //collect bytes until B
+  ReadCycle(); // Get 5 digit reading
+}
+
+
+void setup() { // put your setup code here, to run once:
   Serial.begin(115200);
-
-  pinMode(clock_pin, OUTPUT);
-
-  Serial.print("\r\n\r\nSetup using pins: clk:" );  
-  Serial.print(clock_pin);
-  Serial.print(" (ON=" );  
-  Serial.print(clock_ON);
-  Serial.print(")" );  
-  Serial.print(" data pin "); 
-  Serial.println(read_pin);
-
-  // power off the meter
-  digitalWrite(clock_pin, clock_OFF); 
-  pinMode(read_pin, INPUT_PULLUP);
-
-  // make sure that the meter is reset
-  delay(2000); 
-  
-  Serial.println("Sensus Meter setup done...");
+  Serial.flush();
+  pinMode (RxData,INPUT_PULLUP); // Meter Read Pin
+  pinMode (TxClock,OUTPUT); // clock Pin
+  Serial.begin(115200);//115200
+  digitalWrite(TxClock,LOW); // off
+  Serial.println("Setup Done!");
 }
 
 void loop() 
-{
-  // Read Data
-  read_sensus();
+{ // put your main code here, to run repeatedly:
+  currentMillis = millis();
+  if (currentMillis - previousMillis > interval) {
+    previousMillis = currentMillis;
+    int x = millis();
+    GetData(); // verify data
 
-  // Wait 10s before next reading
-  delay(10000);
+    int y = millis();
+    int z = y-x;
+    Serial.print(" Disconnected. Connect time ");
+    Serial.print(z);
+    Serial.print(" ");
+    DataPrint();
+  }
+  
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -9,14 +9,31 @@ Green to D3 (Data)
 
 ## output
 
+Code issued from
+
+https://github.com/BobPrust/Water-Meter-Readers-Neptune-and-Sensus
+
+for testing 
+
+
 Typical output
 
+Does not work on our side 
+
 ```
-Setup using pins: clk:2 (ON=1) data pin 3
-Sensus Meter setup done...
-Powering Meter...Done
-Reading : 8656593B82526642483048304830483048305436593B734966424931553748304830483057394931543613D
-received 21 bytes
-MeterID 17000916, Volume 6
+GetData
+
+ Disconnected. Connect time 1209 ,Y;.& cycle count is 1
+GetData
+
+ Disconnected. Connect time 1221 x1".w cycle count is 2
+GetData
+
+ Disconnected. Connect time 1227 y;{[. cycle count is 3
+GetData
+
+ Disconnected. Connect time 1227 {[[. cycle count is 4
+GetData
+
 
 ```
