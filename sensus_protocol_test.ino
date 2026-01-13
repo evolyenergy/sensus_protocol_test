@@ -80,6 +80,7 @@ uint8_t sensus_readBit()
 
 uint8_t sensus_readByte() 
 {
+  uint8_t to = MAX_WAKE_PULSE;
   uint8_t data = 0;
   bool parity = false;
   uint8_t bit = sensus_readBit() ;
@@ -87,11 +88,10 @@ uint8_t sensus_readByte()
   // First byte to read ? Need to pulse until
   // We got 1st start bit.
   if (wait_start_bit) {
-    uint8_t to = MAX_WAKE_PULSE;
     uint16_t waked_pulses = 1;
     Serial.print("Waiting for 1st Start bit...");
     // Wait until time out or start detected
-    while ( (to-- > 0) && (bit != 0) ) {
+    while ( (--to > 0) && (bit != 0) ) {
       waked_pulses++;
       bit = sensus_readBit();
     }
@@ -101,12 +101,13 @@ uint8_t sensus_readByte()
       Serial.print(waked_pulses);
       Serial.println(" pulses");
     } else {
-      Serial.println("Unable to wake device");
+      Serial.print("Unable to wake after ");
+      Serial.print(waked_pulses);
+      Serial.println(" pulses");
     }
   }
 
   if (bit != 0) {
-    // Start bit error
     Serial.print("{");
   }
   for (int i = 0; i < 7; ++i) {
