@@ -1,10 +1,9 @@
 #include <Arduino.h>
-#define SWAP_CLOCK
-#define DELAY_MS 1
+#define SWAP_CLOCK          // Allow to quick test swapping clock mode (ie 0->1 or 1->0)
 
 // Select here meter type to be tested
-//#define TYPE_SENSUS
-#define TYPE_NEPTUNE
+#define TYPE_SENSUS
+//#define TYPE_NEPTUNE
 
 #if defined (TYPE_SENSUS) && defined (TYPE_NEPTUNE)  
 #error "Multiple smart meters are defined please use only one"
@@ -12,6 +11,18 @@
 
 #if !defined (TYPE_SENSUS) && !defined (TYPE_NEPTUNE)  
 #error "No smart meter defined please select one"
+#endif
+
+#if defined (TYPE_SENSUS)
+
+#define SETTLE_TIME     250 // Settle time for device (in ms)
+#define DELAY_US       1000 // delay (us) between clock pulse and read (and read to clock end)
+#define MAX_WAKE_PULSE  100 // Max pulse to wait for start bit of the frame
+
+#elif defined (TYPE_NEPTUNE)
+
+#define SETTLE_TIME    1000  // Settle time for device (in ms)
+
 #endif
 
 #ifdef SWAP_CLOCK
@@ -28,17 +39,25 @@
 uint8_t clock_pin = 2;
 uint8_t read_pin = 3;
 
+// Sensus wait start bit
+bool wait_start_bit = true;
+
 // Sensus / Neptune receive buffer
 uint8_t read_buff[MAX_BYTES]; 
 
 // power on meter
 void powerUp()
 {
-  Serial.print("Powering Meter...");
+  Serial.print("Powering Meter, waiting ");
+  Serial.print(SETTLE_TIME);
+  Serial.print("ms ... ");
   digitalWrite(clock_pin, clock_ON); 
 
   // wait to stabilize
-  delay(1000);
+  delay(SETTLE_TIME);
+
+  // We will need to wait for start bit
+  wait_start_bit = true ;
 
   Serial.println("Done");
 }
@@ -52,10 +71,10 @@ void powerDown()
 uint8_t sensus_readBit()
 {
   digitalWrite(clock_pin, clock_OFF);
-  delay(DELAY_MS);
+  delayMicroseconds(DELAY_US);
   uint8_t val = digitalRead(read_pin);
   digitalWrite(clock_pin, clock_ON);
-  delay(DELAY_MS);
+  delayMicroseconds(DELAY_US);
   return val;
 }
 
@@ -63,7 +82,31 @@ uint8_t sensus_readByte()
 {
   uint8_t data = 0;
   bool parity = false;
-  if (sensus_readBit() != 0) {
+  uint8_t bit = sensus_readBit() ;
+
+  // First byte to read ? Need to pulse until
+  // We got 1st start bit.
+  if (wait_start_bit) {
+    uint8_t to = MAX_WAKE_PULSE;
+    uint16_t waked_pulses = 1;
+    Serial.print("Waiting for 1st Start bit...");
+    // Wait until time out or start detected
+    while ( (to-- > 0) && (bit != 0) ) {
+      waked_pulses++;
+      bit = sensus_readBit();
+    }
+    wait_start_bit = false;
+    if (to>0){
+      Serial.print("OK ");
+      Serial.print(waked_pulses);
+      Serial.println(" pulses");
+    } else {
+      Serial.println("Unable to wake device");
+    }
+  }
+
+  if (bit != 0) {
+    // Start bit error
     Serial.print("{");
   }
   for (int i = 0; i < 7; ++i) {
@@ -73,9 +116,11 @@ uint8_t sensus_readByte()
     }
   }
   if (sensus_readBit() != parity) {
+    // Parity bit error
     Serial.print("!");
   }
   if (sensus_readBit() != 1) {
+    // Stop bit error
     Serial.print("}");
   }
   return data;   
@@ -83,6 +128,7 @@ uint8_t sensus_readByte()
 
 
 // data comes in as V;RBxxxxxxx;IByyyyy;Kmmmmm
+// data comes in as V;RBxxxxxxx;INyyyyy;Kmmmmm
 //  where xxxx is the meter read value (arbitrary digits, but not more than 12)
 //  yyyy is the meter id (arbitrary digits)
 //  mmmm is another meter id (arbitrary digits)
@@ -111,10 +157,12 @@ bool sensus_parseData(uint8_t * p_data, uint32_t * p_index, uint32_t * p_id )
         state = PARSE_PRE;
       break;
       case PARSE_PRE:
-        if ((*p_data == 'R') && (*(p_data + 1) == 'B')) {
+      {
+        uint8_t next = *(p_data + 1);
+        if (*p_data == 'R' && next=='B') {
           num_ptr = p_index;
           p_data ++;
-        } else if ((*p_data == 'I') && (*(p_data + 1) == 'B')) {
+        } else if (*p_data=='I' && (next=='B' || next=='N') ) {
           num_ptr = p_id;
           p_data++;
         } else if ((*p_data == 'K')) {
@@ -122,6 +170,7 @@ bool sensus_parseData(uint8_t * p_data, uint32_t * p_index, uint32_t * p_id )
         }
         *num_ptr = 0;
         state = PARSE_NUM;
+      }
       break;
       case PARSE_NUM:
         if (((*p_data) >= 48) && ((*p_data) <= 57)) {
@@ -285,16 +334,23 @@ uint8_t neptune_readData(uint8_t * p, uint8_t max_bytes)
   digitalWrite(clock_pin, clock_OFF); 
 }
 
-
 void read_sensus() 
 {
   uint8_t len;
   len = sensus_readData(read_buff, MAX_BYTES);
   Serial.print("received "); 
   Serial.print(len); 
-  Serial.println(" bytes"); 
+  Serial.print(" bytes : "); 
+
   if (len<MAX_BYTES) {
     uint32_t volume, id ;
+
+    // Dump ASCII String
+    for (uint8_t i=0 ; i<len; i++) {
+      Serial.print((char) read_buff[i]);
+    }
+    Serial.println();
+
     if (sensus_parseData(read_buff, &volume, &id)) {
       Serial.print("MeterID "); 
       Serial.print(id); 
@@ -305,7 +361,7 @@ void read_sensus()
       Serial.println((char *) read_buff);
     }
   } else {
-    Serial.println("Unable to read "); 
+    Serial.println("Unable to read Sensus"); 
   }
 
   // Wait 10s before next reading
@@ -334,32 +390,40 @@ void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  Serial.flush();
 
   pinMode(clock_pin, OUTPUT);
 
-  Serial.print("\r\n\r\nSetup using pins: clk:" );  
+  Serial.print("\r\n\r\nSetup " );  
+
+#if defined (TYPE_SENSUS)
+  Serial.print("Sensus" );  
+#elif defined (TYPE_NEPTUNE)
+  Serial.print("Neptune" );  
+#endif
+
+  Serial.print(" clk=io" );  
   Serial.print(clock_pin);
   Serial.print(" (ON=" );  
   Serial.print(clock_ON);
-  Serial.print(")" );  
-  Serial.print(" data pin "); 
+  Serial.print("), " );  
+  Serial.print("data=io"); 
   Serial.println(read_pin);
+
+  Serial.print("Settle Time " );  
+  Serial.print(SETTLE_TIME );  
+  Serial.print("ms, Clock Pulse " );  
+  Serial.print(DELAY_US );  
+  Serial.println("us");  
 
   // power off the meter
   digitalWrite(clock_pin, clock_OFF); 
   pinMode(read_pin, INPUT_PULLUP);
 
-  // Select here one to be tested, not both
-  #if defined (TYPE_SENSUS) 
-  Serial.print("Sensus");
-  #elif defined (TYPE_NEPTUNE)  
-  Serial.print("Neptune");
-  #endif
-
   // make sure that the meter is reset
-  delay(2000); 
+  //delay(2000); 
   
-  Serial.println(" Meter setup done...");
+  Serial.println("Sensus Meter setup done...");
 }
 
 void loop() 
