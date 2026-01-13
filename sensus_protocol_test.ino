@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #define SWAP_CLOCK          // Allow to quick test swapping clock mode (ie 0->1 or 1->0)
-#define DELAY_MS 1          // delay between clock pulse and read (and read to clock end)
+#define DELAY_US       1000 // delay between clock pulse and read (and read to clock end)
+#define SETTLE_TIME     250 // Settle time for device 
 #define MAX_WAKE_PULSE  100 // Max pulse to wait for start bit of the frame
 
 #ifdef SWAP_CLOCK
@@ -19,16 +20,21 @@ uint8_t read_pin = 3;   // D3 for data reading
 
 // Sensus receive buffer
 uint8_t read_buff[MAX_BYTES]; 
-bool sync_start = true;
+bool wait_start_bit = true;
 
 // power on meter
 void powerUp()
 {
-  Serial.print("Powering Meter...");
+  Serial.print("Powering Meter, waiting ");
+  Serial.print(SETTLE_TIME);
+  Serial.print("ms ... ");
   digitalWrite(clock_pin, clock_ON); 
 
   // wait to stabilize
-  delay(1000);
+  delay(SETTLE_TIME);
+
+  // We will need to wait for start bit
+  wait_start_bit = true ;
 
   Serial.println("Done");
 }
@@ -42,31 +48,42 @@ void powerDown()
 uint8_t sensus_readBit()
 {
   digitalWrite(clock_pin, clock_OFF);
-  delay(DELAY_MS);
+  delayMicroseconds(DELAY_US);
   uint8_t val = digitalRead(read_pin);
   digitalWrite(clock_pin, clock_ON);
-  delay(DELAY_MS);
+  delayMicroseconds(DELAY_US);
   return val;
 }
 
 uint8_t sensus_readByte() 
 {
-  
   uint8_t data = 0;
   bool parity = false;
   uint8_t bit = sensus_readBit() ;
 
-  if (sync_start) {
+  // First byte to read ? Need to pulse until
+  // We got 1st start bit.
+  if (wait_start_bit) {
     uint8_t to = MAX_WAKE_PULSE;
-    Serial.println("Wait Start bit");
-    while ( bit != 0 && to > 0 ) {
-      to--;
+    uint16_t waked_pulses = 1;
+    Serial.print("Waiting for 1st Start bit...");
+    // Wait until time out or start detected
+    while ( (to-- > 0) && (bit != 0) ) {
+      waked_pulses++;
       bit = sensus_readBit();
     }
-    sync_start = false;
+    wait_start_bit = false;
+    if (to>0){
+      Serial.print("OK ");
+      Serial.print(waked_pulses);
+      Serial.println(" pulses");
+    } else {
+      Serial.println("Unable to wake device");
+    }
   }
 
   if (bit != 0) {
+    // Start bit error
     Serial.print("{");
   }
   for (int i = 0; i < 7; ++i) {
@@ -76,9 +93,11 @@ uint8_t sensus_readByte()
     }
   }
   if (sensus_readBit() != parity) {
+    // Parity bit error
     Serial.print("!");
   }
   if (sensus_readBit() != 1) {
+    // Stop bit error
     Serial.print("}");
   }
   return data;   
@@ -94,9 +113,6 @@ uint8_t sensus_readData(uint8_t * p, uint8_t max_bytes)
 
   // Clear receive buffer
   memset(p, 0, sizeof(max_bytes));
-
-  // Sync start bit
-  sync_start = true;
 
   for (i = 0; i < max_bytes; ++i) {
     c = sensus_readByte();
@@ -211,12 +227,18 @@ void setup()
   Serial.print(" data pin "); 
   Serial.println(read_pin);
 
+  Serial.print("Settle Time :" );  
+  Serial.print(SETTLE_TIME );  
+  Serial.print("ms,  Clock Pulse Duration :" );  
+  Serial.print(DELAY_US );  
+  Serial.println("ms");  
+
   // power off the meter
   digitalWrite(clock_pin, clock_OFF); 
   pinMode(read_pin, INPUT_PULLUP);
 
   // make sure that the meter is reset
-  delay(2000); 
+  //delay(2000); 
   
   Serial.println("Sensus Meter setup done...");
 }
